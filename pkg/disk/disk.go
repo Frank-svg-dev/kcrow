@@ -3,16 +3,17 @@ package disk
 import (
 	"bufio"
 	"fmt"
-	"hash/crc32"
 	"os"
 	"os/exec"
+	"path/filepath"
+	"strconv"
 	"strings"
 )
 
-func getOverlayPath(containerRootfs string) (string, error) {
+func getOverlayPath(containerRootfs string) (uint64, string, error) {
 	f, err := os.Open(SystemMountInfoFile)
 	if err != nil {
-		return "", fmt.Errorf("failed to open host_mountinfo: %v", err)
+		return 0, "", fmt.Errorf("failed to open host_mountinfo: %v", err)
 	}
 	defer f.Close()
 
@@ -43,16 +44,24 @@ func getOverlayPath(containerRootfs string) (string, error) {
 		for _, opt := range strings.Split(options, ",") {
 			if strings.HasPrefix(opt, "upperdir=") {
 				upperDir := strings.TrimPrefix(opt, "upperdir=")
-				return upperDir, nil
+				cleanPath := filepath.Clean(upperDir)
+				if strings.HasSuffix(cleanPath, "/fs") {
+					cleanPath = filepath.Dir(cleanPath)
+				}
+				snapshotId, err := strconv.ParseUint(filepath.Base(cleanPath), 10, 64)
+				if err != nil {
+					return 0, "", fmt.Errorf("failed to parse snapshot id from path [%s]: %v", upperDir, err)
+				}
+
+				return snapshotId, upperDir, nil
 			}
 		}
 	}
 
-	return "", fmt.Errorf("overlay path not found in mountinfo for %s", containerRootfs)
+	return 0, "", fmt.Errorf("overlay path not found in mountinfo for %s", containerRootfs)
 }
 
-func applyXFSQuota(id string, path string, limitMB int) error {
-	projectID := crc32.ChecksumIEEE([]byte(id))
+func applyXFSQuota(projectID uint64, path string, limitMB int) error {
 	mountPoint := ContainerdRootPath
 	exec.Command("xfs_quota", "-x", "-c", fmt.Sprintf("project -C -p %s %d", path, projectID), mountPoint).Run()
 

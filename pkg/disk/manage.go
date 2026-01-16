@@ -27,7 +27,7 @@ type manager struct {
 
 func DiskManager(ns *k8s.NsManage, po *k8s.PodManage) oci.Oci {
 	if !checkContainerdRootPathQuotaEnabled() {
-		klog.Warning("The disk where /var/lib/container is located does not have prjquota enabled, skipping DiskManager init..... ")
+		klog.Warning("The disk where /var/lib/containerd is located does not have prjquota enabled, skipping DiskManager init..... ")
 		return nil
 	}
 
@@ -66,7 +66,8 @@ func (m *manager) Start(ctx context.Context, pod *api.PodSandbox, container *api
 	klog.V(2).Infof("Applying quota %d MB to container %s (ID: %s) at %s", limitMB, container.Name, container.Id, rootfsPath)
 
 	runPath := filepath.Join(ContainerdBasePath, container.Id, "rootfs")
-	foundPath, err := getOverlayPath(runPath)
+	//Obtain the snapshot ID of overlays as the ProjectID of xfs_quota
+	snapshotID, foundPath, err := getOverlayPath(runPath)
 	if err == nil && foundPath != "" {
 		rootfsPath = foundPath
 	} else {
@@ -74,9 +75,9 @@ func (m *manager) Start(ctx context.Context, pod *api.PodSandbox, container *api
 		return nil
 	}
 
-	klog.V(2).Infof("Target XFS Quota Path: %s", rootfsPath)
+	klog.V(2).Infof("Target XFS Quota Path: %s, Quota ProjectID: %v", rootfsPath, snapshotID)
 
-	if err := applyXFSQuota(container.Id, rootfsPath, limitMB); err != nil {
+	if err := applyXFSQuota(snapshotID, rootfsPath, limitMB); err != nil {
 		klog.Errorf("Failed to apply quota: %v", err)
 	}
 	return nil
